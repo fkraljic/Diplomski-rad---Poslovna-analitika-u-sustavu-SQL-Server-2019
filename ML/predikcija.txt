@@ -1,0 +1,51 @@
+USE [US_Fatal_Police_Shootings]
+GO
+/****** Object:  StoredProcedure [dbo].[predikcija]    Script Date: 6.7.2020. 23:16:36 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[predikcija] (@id INT)
+AS
+DECLARE @model varbinary(max) = (SELECT TOP 1 model FROM [dbo].[Model] ORDER BY date_created DESC, number_of_rows_used DESC);
+BEGIN
+ EXEC sp_execute_external_script
+    @language = N'R'
+    , @script = N'
+
+		databaseTable2 <- PredictData
+		table2 <- data.frame(
+					databaseTable2$age,
+					databaseTable2$manner_of_death,
+					databaseTable2$armed,
+					databaseTable2$gender,
+					databaseTable2$race,
+					databaseTable2$area,
+					databaseTable2$thread_level,
+					databaseTable2$flee,
+					databaseTable2$city
+					)
+
+		names(table2) <- c("age", "manner", "armed", "gender", "race", "state", "thread", "flee", "city")
+
+		current_model <- unserialize(as.raw(model));
+		predicted <- predict(current_model, table2, type = "response");
+
+		options("scipen" = 100, "digits" = 4)
+		print(predicted)
+
+		sings_of_mental_illness <- data.frame(predicted)
+
+		OutputDataSet <- sings_of_mental_illness
+        '
+    , @input_data_1 = N'SELECT sp.mental_illness,sc.manner_of_death,sc.armed,sp.age,r.gender,r.race,l.area,l.city,sc.thread_level,sc.flee FROM [dbo].[ShootPerson] sp
+                JOIN [dbo].[ShootingCircumstances] sc ON sc.id=sp.fk_shooting_circ
+                JOIN [dbo].[Race] r ON sp.fk_race=r.id
+                JOIN [dbo].[Location] l ON l.id=sp.fk_location
+				WHERE sp.id=@ID'
+	, @input_data_1_name=N'PredictData'
+    , @params = N'@ID INT,@model VARBINARY(max)'
+	, @ID=@id
+    , @model = @model
+WITH RESULT SETS ((Predicted FLOAT));
+END
